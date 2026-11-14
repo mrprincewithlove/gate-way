@@ -1,0 +1,53 @@
+name: Update VPNGate Data
+
+on:
+  schedule:
+    # Runs every 30 minutes
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-vpngate:
+    name: Fetch and Update VPNGate Data
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch and parse VPNGate servers
+        run: npm run build
+        env:
+          VPNGATE_URL: ${{ secrets.VPNGATE_URL || 'https://www.vpngate.net/en/' }}
+          VPNGATE_MIRRORS: ${{ secrets.VPNGATE_MIRRORS || 'http://www.vpngate.net/en/,https://vpngate.net/en/' }}
+          USER_AGENT: ${{ secrets.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36' }}
+          REQUEST_TIMEOUT_MS: 45000
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'mrprincewithlove'
+          git config --global user.email 'ereshjumayew@gmail.com'
+
+          git add data/
+          if git diff --staged --quiet; then
+            echo "No data changes detected."
+          else
+            git commit -m "Automated VPNGate data update [skip ci]"
+            git push origin main
+          fi
