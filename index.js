@@ -71,11 +71,62 @@ async function fetchHtml() {
 }
 
 /**
- * Saves JSON array to specified file.
+ * Generates a unique signature representing a server's identity and port configuration.
+ * Includes IP, primary port, tcpPort, udpPort, and protocol-specific ports.
+ */
+function getServerPortSignature(server) {
+    if (!server) return '';
+    const ip = server.ip || '';
+    const port = server.port ?? '';
+    const tcpPort = server.tcpPort ?? '';
+    const udpPort = server.udpPort ?? '';
+    const sstpPort = server.details?.protocols?.sstp?.port ?? '';
+    const ovTcp = server.details?.protocols?.openVpn?.tcpPort ?? '';
+    const ovUdp = server.details?.protocols?.openVpn?.udpPort ?? '';
+    const sslTcp = server.details?.protocols?.sslVpn?.tcpPort ?? '';
+    return `${ip}:${port}:${tcpPort}:${udpPort}:${sstpPort}:${ovTcp}:${ovUdp}:${sslTcp}`;
+}
+
+/**
+ * Merges newly fetched servers with existing servers in the file:
+ * - Keeps existing servers.
+ * - If a server already exists with identical IP and ports, it is skipped.
+ * - If a server is new or has any changed port (port, tcpPort, udpPort, etc.), it is added.
  */
 function saveDataToJson(data, filePath) {
-    console.info(`Saving data (${data.length} entries) to file: ${filePath}`);
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 0), 'utf-8');
+    let existingData = [];
+    if (fs.existsSync(filePath)) {
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8').trim();
+            if (content) {
+                const parsed = JSON.parse(content);
+                if (Array.isArray(parsed)) {
+                    existingData = parsed;
+                }
+            }
+        } catch (err) {
+            console.warn(`Error reading existing data from ${filePath}: ${err.message}. Starting fresh.`);
+            existingData = [];
+        }
+    }
+
+    const seenSignatures = new Set(existingData.map(getServerPortSignature));
+    const newEntries = [];
+
+    for (const server of data) {
+        const sig = getServerPortSignature(server);
+        if (!seenSignatures.has(sig)) {
+            seenSignatures.add(sig);
+            newEntries.push(server);
+        }
+    }
+
+    const mergedData = [...existingData, ...newEntries];
+    console.info(
+        `Saving data to file: ${filePath} (${existingData.length} existing, ${newEntries.length} new/port-changed added, ${mergedData.length} total)`
+    );
+    fs.writeFileSync(filePath, JSON.stringify(mergedData, null, 0), 'utf-8');
+    return mergedData;
 }
 
 /**
@@ -149,9 +200,9 @@ function updateFilesInfo(directory, filesInfoFilePath) {
             return;
         }
 
-        saveDataToJson(parsedData, todayJsonFile);
+        const savedData = saveDataToJson(parsedData, todayJsonFile);
 
-        const ipPortList = parsedData.map(entry => entry.key);
+        const ipPortList = savedData.map(entry => entry.key);
         updateDb(ipPortList, dbFile);
 
         updateFilesInfo(dataDir, filesInfoFile);
